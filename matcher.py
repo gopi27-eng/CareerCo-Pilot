@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv(r"C:/Users/Gopi/Desktop/Automate Job Application Agnetic AI/.env")
 
 # Initialize Gemini Client securely
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 def extract_resume_text():
     """Extracts text from your resume file defined in .env."""
