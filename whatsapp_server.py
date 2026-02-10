@@ -6,6 +6,12 @@ from main_app import run_automation
 
 app = Flask(__name__)
 
+# Health check endpoint for Render
+@app.route("/", methods=['GET', 'HEAD'])
+def health_check():
+    """Render pings this endpoint to verify the service is running"""
+    return "🤖 AeroApplied Job Bot - Status: Online", 200
+
 @app.route("/whatsapp", methods=['POST'])
 def whatsapp_reply():
     incoming_msg = request.values.get('Body', '').lower().strip()
