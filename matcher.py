@@ -1,46 +1,62 @@
-import json, PyPDF2
+import os
+import PyPDF2
 from google import genai
-from google.genai import types
+from dotenv import load_dotenv
 
-client = genai.Client(api_key="AIzaSyBhY-PTuMxEzy9daGlkcRKRBRuxnKsr78M")
+# Load variables from .env
+load_dotenv(r"C:/Users/Gopi/Desktop/Automate Job Application Agnetic AI/.env")
 
-def extract_resume_text(pdf_path):
+# Initialize Gemini Client securely
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+def extract_resume_text():
+    """Extracts text from your resume file defined in .env."""
+    pdf_path = os.getenv("RESUME_PATH", "Borra_Gopi_Resume.pdf")
     try:
         reader = PyPDF2.PdfReader(pdf_path)
         return "".join([page.extract_text() for page in reader.pages])
-    except Exception: return ""
+    except Exception as e:
+        print(f"⚠️ Could not read resume: {e}")
+        return ""
 
 def is_good_match(job_description):
     """
-    Evaluates job descriptions against Gopi Borra's Data Science profile.
-    Targeting roles that fit an M.Sc. student with internship experience.
+    Uses Gemini AI to decide if the job matches Gopi's M.Sc. Data Science 
+    and Unified Mentor internship profile.
     """
-    job_desc_lower = job_description.lower()
+    resume_text = extract_resume_text()
     
-    # 1. High-Value Technical Keywords
-    # Based on your PW Skills and Unified Mentor experience
-    tech_keywords = [
-        "python", "sql", "machine learning", "ml", "data analysis", 
-        "power bi", "tableau", "statistics", "pandas", "scikit-learn"
-    ]
+    prompt = f"""
+    You are an expert HR Analyst. Compare the following Resume and Job Description.
     
-    # 2. Preferred Industry/Level Terms
-    # Targeting Entry-to-Intermediate roles for your transition
-    level_keywords = ["junior", "associate", "intern", "entry level", "fresher"]
+    Resume: {resume_text}
+    Job Description: {job_description}
+    
+    Decision Criteria:
+    1. Does the job require Python, SQL, or ML?
+    2. Is it suitable for someone with an M.Sc. in Data Science and an internship?
+    3. Ignore jobs requiring 10+ years of experience.
+    
+    Return ONLY a JSON object: {{"match": true/false, "reason": "short explanation"}}
+    """
 
-    # 3. Match Scoring Logic
-    tech_score = sum(1 for word in tech_keywords if word in job_desc_lower)
-    level_match = any(word in job_desc_lower for word in level_keywords)
-
-    # 4. Decision Logic
-    # We apply if the job mentions at least 3 tech skills
-    # We give a bonus if it's explicitly an entry-level/associate role
-    if tech_score >= 3:
-        print(f"✅ Match Score: {tech_score}/10. Criteria met.")
-        return True
-    elif tech_score >= 2 and level_match:
-        print(f"✅ Match Score: {tech_score}/10 with Level Match. Criteria met.")
-        return True
-    
-    print(f"❌ Match Score: {tech_score}/10. Requirements not met.")
-    return False
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+        # Clean the response and parse JSON
+        result = response.text.replace('```json', '').replace('```', '').strip()
+        data = eval(result) # Convert string to dict
+        
+        if data.get("match"):
+            print(f"✅ AI Match Found: {data.get('reason')}")
+            return True
+        else:
+            print(f"❌ AI Skip: {data.get('reason')}")
+            return False
+            
+    except Exception as e:
+        print(f"⚠️ AI Matching Error, falling back to keyword search: {e}")
+        # Fallback to your old keyword logic if API fails
+        return "python" in job_description.lower() or "data" in job_description.lower()
