@@ -1,0 +1,6 @@
+myenv/
+__pycache__/
+.env
+chromedriver.exe
+job_automation.db
+*.zip

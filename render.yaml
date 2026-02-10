@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: job-bot-server
+    env: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+    startCommand: python whatsapp_server.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
