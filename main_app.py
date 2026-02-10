@@ -27,9 +27,8 @@ def run_automation():
         driver.get(search_url)
         time.sleep(5)
 
-        # 3. Locate Job Cards
-        # Note: Selectors may need adjustment based on LinkedIn's dynamic HTML
-        job_cards = driver.find_elements("class name", "job-card-container")[:10] 
+        
+        job_cards = driver.find_elements("class name", "jobs-search-results-list__list-item")[:10] 
         print(f"🔍 Found {len(job_cards)} potential job matches.")
 
         for index, card in enumerate(job_cards):
