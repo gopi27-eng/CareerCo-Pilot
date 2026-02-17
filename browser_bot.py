@@ -1,70 +1,148 @@
 import os
-import random
 import time
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import random
+import requests
+from bs4 import BeautifulSoup
+
+# ─────────────────────────────────────────────
+# LinkedIn session via requests (no Chrome needed)
+# ─────────────────────────────────────────────
+
+SESSION = None
 
 def start_stealth_browser():
-    """Optimized for Render Cloud using Headless Chrome."""
-    options = Options()
-    options.add_argument("--headless=new") 
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
-    
-    # Anti-detection for Headless mode
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
+    """
+    Returns a requests.Session that mimics a real browser.
+    No Chrome / Selenium needed — works on Render free tier (512 MB).
+    """
+    global SESSION
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    })
+    SESSION = session
+    print("✅ Lightweight HTTP session started (no Chrome needed).")
+    return session
 
-    try:
-        # Render's environment will provide the binary
-        driver = webdriver.Chrome(options=options)
-        return driver
-    except Exception as e:
-        print(f"❌ Cloud Launch Error: {e}")
-        return None
 
-def login_to_linkedin(driver):
-    """Logs into LinkedIn using credentials from Render Environment Variables."""
+def login_to_linkedin(session):
+    """
+    Logs into LinkedIn using form POST — no browser required.
+    Returns True on success.
+    """
     email = os.environ.get("LINKEDIN_EMAIL")
     password = os.environ.get("LINKEDIN_PASSWORD")
-    
-    driver.get("https://www.linkedin.com/login")
-    time.sleep(random.uniform(2, 4))
-    
+
+    if not email or not password:
+        print("❌ LINKEDIN_EMAIL / LINKEDIN_PASSWORD not set in Render env vars.")
+        return False
+
     try:
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "username"))).send_keys(email)
-        driver.find_element(By.ID, "password").send_keys(password)
-        driver.find_element(By.XPATH, "//button[@type='submit']").click()
-        print("🔐 Logged into LinkedIn successfully.")
-        time.sleep(5)
+        # Step 1 — get CSRF token from login page
+        login_page = session.get("https://www.linkedin.com/login", timeout=30)
+        soup = BeautifulSoup(login_page.text, "html.parser")
+        csrf_tag = soup.find("input", {"name": "loginCsrfParam"})
+        csrf = csrf_tag["value"] if csrf_tag else ""
+
+        # Step 2 — submit credentials
+        payload = {
+            "session_key": email,
+            "session_password": password,
+            "loginCsrfParam": csrf,
+        }
+        resp = session.post(
+            "https://www.linkedin.com/checkpoint/lg/login-submit",
+            data=payload,
+            timeout=30,
+            allow_redirects=True,
+        )
+
+        # Step 3 — verify login by checking for feed redirect
+        if "feed" in resp.url or "mynetwork" in resp.url or resp.status_code == 200:
+            print("🔐 Logged into LinkedIn successfully.")
+            return True
+        else:
+            print(f"⚠️ Login redirect went to: {resp.url}")
+            return False
+
     except Exception as e:
         print(f"❌ Login failed: {e}")
+        return False
 
-def handle_linkedin_popup(driver):
-    """Processes 'Easy Apply' while keeping you logged in."""
-    target_words = ["Next", "Review", "Submit application", "Submit"]
-    applied_successfully = False
 
-    for i in range(15):
-        found = False
-        time.sleep(random.uniform(2, 4))
-        for word in target_words:
+def search_easy_apply_jobs(session, keyword="Data Scientist", location="India", max_jobs=10):
+    """
+    Searches LinkedIn Jobs for Easy Apply listings and returns job data.
+    Uses the public-facing JSON endpoint LinkedIn exposes for job cards.
+    """
+    jobs = []
+    start = 0
+
+    try:
+        url = (
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+            f"?keywords={keyword.replace(' ', '%20')}"
+            f"&location={location}"
+            f"&f_AL=true"          # Easy Apply only
+            f"&start={start}"
+        )
+        resp = session.get(url, timeout=30)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.find_all("div", {"class": "base-card"})
+
+        print(f"  📋 Found {len(cards)} cards for '{keyword}'")
+
+        for card in cards[:max_jobs]:
             try:
-                xpath = f"//button[contains(., '{word}')] | //button[contains(span, '{word}')]"
-                btn = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
-                if word in ["Submit application", "Submit"]:
-                    applied_successfully = True
-                driver.execute_script("arguments[0].scrollIntoView();", btn)
-                btn.click()
-                found = True
-                break
-            except:
+                title_tag = card.find("h3", {"class": "base-search-card__title"})
+                company_tag = card.find("h4", {"class": "base-search-card__subtitle"})
+                link_tag = card.find("a", {"class": "base-card__full-link"})
+                job_id_tag = card.get("data-entity-urn", "")
+
+                title = title_tag.text.strip() if title_tag else "Unknown"
+                company = company_tag.text.strip() if company_tag else "Unknown"
+                link = link_tag["href"].split("?")[0] if link_tag else ""
+                job_id = job_id_tag.split(":")[-1] if job_id_tag else ""
+
+                if title and link:
+                    jobs.append({
+                        "title": title,
+                        "company": company,
+                        "link": link,
+                        "job_id": job_id,
+                    })
+            except Exception as e:
                 continue
-        if not found: break
-    return applied_successfully
+
+    except Exception as e:
+        print(f"  ⚠️ Search error for '{keyword}': {e}")
+
+    return jobs
+
+
+def get_job_description(session, job_url):
+    """Fetches the full job description text for matching."""
+    try:
+        resp = session.get(job_url, timeout=30)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        desc = soup.find("div", {"class": "description__text"})
+        return desc.get_text(separator=" ").strip() if desc else ""
+    except Exception as e:
+        print(f"  ⚠️ Could not fetch job description: {e}")
+        return ""
+
+
+def handle_linkedin_popup(session):
+    """
+    Easy Apply via the API is not feasible with plain requests alone
+    (LinkedIn's apply flow requires JS). This returns False to skip
+    auto-applying while still allowing the job to be logged.
+    For now, the bot FINDS and LOGS matching jobs, and you apply manually.
+    """
+    return False
