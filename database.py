@@ -10,11 +10,11 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS applications (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            platform  TEXT,
-            job_title TEXT,
-            status    TEXT,
-            link      TEXT,
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform   TEXT,
+            job_title  TEXT,
+            status     TEXT,
+            link       TEXT,
             applied_at TEXT
         )
     """)
@@ -22,12 +22,12 @@ def init_db():
     conn.close()
 
 def log_application(platform, job_title, status, link=""):
-    """Logs a job application to the SQLite database."""
+    """Logs a matched job to the SQLite database, skipping duplicates."""
     init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Avoid duplicates — check if this job title was already logged today
+    # Skip if already logged today
     today = datetime.now().strftime("%Y-%m-%d")
     cursor.execute(
         "SELECT id FROM applications WHERE job_title = ? AND applied_at LIKE ?",
