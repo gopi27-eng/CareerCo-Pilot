@@ -1,70 +1,84 @@
-import os
-import json
-import PyPDF2
-from google import genai
+"""
+matcher.py — Keyword-based job matching for Gopi Borra
+No API calls needed. Completely free. Runs forever without quota limits.
 
-# Initialize Gemini Client using Render environment variable (not hardcoded .env path)
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+Scoring system:
+  - Each matched keyword adds points
+  - Job must hit a minimum score threshold to be considered a match
+  - Instant disqualification for senior-only roles
+"""
 
-def extract_resume_text():
-    """Extracts text from resume. On Render, looks in the working directory."""
-    pdf_path = os.environ.get("RESUME_PATH", "Borra_Gopi_Resume.pdf")
-    try:
-        reader = PyPDF2.PdfReader(pdf_path)
-        return "".join([page.extract_text() for page in reader.pages])
-    except Exception as e:
-        print(f"⚠️ Could not read resume PDF ({e}). Using hardcoded profile instead.")
-        # Fallback profile so matching still works even without the PDF on Render
-        return """
-        Gopi Borra | M.Sc. Data Science, Chandigarh University (9.00 SGPA)
-        Skills: Python, SQL, Machine Learning, Data Analysis, Power BI, Pandas, NumPy
-        Experience: Unified Mentor Data Science Internship | 5 years Aviation Security
-        Projects: Job Application Bot, Agentic AI Automation
-        """
+# ── Keywords that signal a GOOD match ──────────────────────────────────────
 
-def is_good_match(job_description):
+STRONG_KEYWORDS = [
+    # Core skills
+    "python", "sql", "machine learning", "data science", "deep learning",
+    "nlp", "natural language", "neural network", "tensorflow", "pytorch",
+    "scikit", "pandas", "numpy", "data analysis", "analytics",
+    # Roles that fit
+    "data scientist", "data analyst", "ml engineer", "ai engineer",
+    "business analyst", "research analyst", "junior", "associate",
+    "fresher", "entry level", "graduate", "intern", "trainee",
+    # Tools Gopi knows
+    "power bi", "tableau", "excel", "statistics", "regression",
+    "classification", "clustering", "gen ai", "generative ai", "llm",
+]
+
+WEAK_KEYWORDS = [
+    # Broader matches — worth fewer points
+    "artificial intelligence", "big data", "cloud", "aws", "azure",
+    "spark", "hadoop", "r programming", "visualization", "etl",
+    "mysql", "postgresql", "mongodb", "api", "automation",
+]
+
+# ── Keywords that DISQUALIFY a job ─────────────────────────────────────────
+
+DISQUALIFY_PHRASES = [
+    "10+ years", "10 years", "12+ years", "15 years", "15+ years",
+    "senior staff", "principal engineer", "director", "vp of",
+    "vice president", "head of data", "chief", "cto", "cdo",
+    "lead with 8", "lead with 7", "7+ years experience",
+    "8+ years", "9+ years",
+]
+
+# ── Thresholds ──────────────────────────────────────────────────────────────
+
+STRONG_WEIGHT = 2    # points per strong keyword hit
+WEAK_WEIGHT   = 1    # points per weak keyword hit
+MIN_SCORE     = 4    # minimum points to be considered a match
+
+
+def is_good_match(job_description: str) -> bool:
     """
-    Uses Gemini AI to decide if the job matches Gopi's profile.
-    Falls back to keyword search if Gemini fails.
+    Returns True if the job description is a good match for Gopi's profile.
+    Pure keyword scoring — no API calls, no quota, no cost.
     """
-    resume_text = extract_resume_text()
+    text = job_description.lower()
 
-    prompt = f"""
-    You are an expert HR Analyst. Compare the following Resume and Job Description.
-
-    Resume:
-    {resume_text}
-
-    Job Description:
-    {job_description}
-
-    Decision Criteria:
-    1. Does the job require Python, SQL, or ML?
-    2. Is it suitable for someone with an M.Sc. in Data Science and an internship?
-    3. Ignore jobs requiring 10+ years of experience.
-
-    Return ONLY valid JSON with no markdown, no backticks:
-    {{"match": true, "reason": "short explanation"}}
-    """
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-
-        # Safe JSON parsing (never use eval on external data)
-        raw = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(raw)
-
-        if data.get("match"):
-            print(f"  ✅ AI Match: {data.get('reason')}")
-            return True
-        else:
-            print(f"  ❌ AI Skip: {data.get('reason')}")
+    # 1. Hard disqualification check
+    for phrase in DISQUALIFY_PHRASES:
+        if phrase in text:
+            print(f"  ⛔ Disqualified — found: '{phrase}'")
             return False
 
-    except Exception as e:
-        print(f"  ⚠️ Gemini error, using keyword fallback: {e}")
-        keywords = ["python", "sql", "data", "machine learning", "analytics", "ml", "ai"]
-        return any(kw in job_description.lower() for kw in keywords)
+    # 2. Score the job
+    score = 0
+    matched = []
+
+    for kw in STRONG_KEYWORDS:
+        if kw in text:
+            score += STRONG_WEIGHT
+            matched.append(kw)
+
+    for kw in WEAK_KEYWORDS:
+        if kw in text:
+            score += WEAK_WEIGHT
+            matched.append(kw)
+
+    # 3. Decision
+    if score >= MIN_SCORE:
+        print(f"  ✅ Match (score={score}) — keywords: {', '.join(matched[:5])}")
+        return True
+    else:
+        print(f"  ❌ No match (score={score}/{MIN_SCORE} needed)")
+        return False
